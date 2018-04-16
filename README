@@ -1,90 +1,144 @@
-	Document for CUDASTL::HashMap
+Name: Hou, Binbing
+Project: PA-1 (Simplebench)
+Instructor: Feng Chen
+Class: cs7700-sp18
+LogonID: cs7700xx 
 
-HashMap is a simple hash table for GPU, it provides an efficient lock-free 
-hash table implementation that allows concurrent read/write. Multiple thr-
-eads can insert/read concurrently, but no delete is allowed.
+/****************************************Introduction**************************************/
 
-===========
-Usage
-===========
-  The HashMap is a template class. It is designed to work on GPU, not CPU.
+This is a program project for the course CSC 7700 Advanced Storage Systems, Spring 2018.
+The purpose of this project is to develop a simple storage benchmark tool that generates 
+different types of workloads to drive the performance tests on a disk drive. 
 
-  
-  ------------
-  Including the files
-  ------------
-  You can include the HashMap class into your code by using:
+The rest of the README file consists of three parts:
 
-      #include "hash_map.h"
-      using namespace CUDASTL;
+Part 1: Run and compile the codes
+Part 2: The structure of the source code files
+Part 3: Additional descriptions
 
-  You will need to compile the code using -arch=compute_13 because the c-
-  ode uses atomic operations, which needs this.
-  If you are compiling the code on a 64bit system, you should also define
-  the macro LONG_PTR.
-  An example of the compilation is as follows:
+/******************************Part 1: Run and compile the codes*************************/
 
-      nvcc use_hash_map.cu -arch=compute_13 -DLONG_PTR
+The tool is super easy to use.
+
+(1) To compile, just use the make command: $ make  
+(2) After successfully compiling, you will get an executable file (the benchmark tool): simplebench
+(3) For using the tool, nine parameters have to be correctly set.
+
+The tool is driven by the parameter settings as follows:
+   
+    ./simplebench -e <Duration (s)>          /*setting the duration of the test in seconds*/
+                  -f <Device or File>        /*setting the target device or file*/
+                  -r <Range (MBs)>           /*setting The accessible range in MB*/
+                  -s <Request Size (KBs)>    /*setting the request size in K*/
+                  -t <Type (Read or Write)>  /*setting the request tyep as Read (R) or Write (W)*/
+                  -p <Pattern (Seq. or Rnd)> /*setting the pattern as sequential (S) or random(R))*/
+                  -q <Num of Threads>        /*setting the queue depth (parallel threads, 1 to 32)*/       
+                  -d <O_DIRECT or not>       /*setting the direct_io flag as (T) or not setting as (F)*/
+                  -o <output trace>          /*setting the output trace file name*/
+
+For example:
+
+    $ ./simplebench -e 60 -f ./testfile -r 1024 -s 4 -t R -p S -q 4 -d T -o ./test.tr
+
+    This command runs a test of 60 seconds to test the file ./testfile with 4 threads, 
+    generating sequential, 4KB, direct I/O, read requests in the range of the first 1 GB 
+    of the file, and produces an output trace file ./test.tr upon completion.
+
+The output information printed on the screen includes the results calculated by different 
+metrics (i.e., average latency, throughout, and bandwidth). Each line of the trace file 
+presents the activity of each I/O request, following the format:
+ 
+    [Timestamp] [Thread ID] [Type] [Offset] [Size] [Latency]
+ 
+    Timestamp: The issue time of I/O (in seconds); the first request timestamp begins at 0.
+    Thread ID: The ID of the thread generating this request Type R or W.
+    Offset: The request offset (in unit of 512-byte sectors).
+    Size: The request size (in number of sectors).
+    Latency: The time of completing request (in milliseconds).
+
+Notes:
+
+(1) Parameter Settings
+
+The parameters can be set in any order; but all of them have to be properly set.
+Refer to the descriptions above for details. The tool will report the incorrect 
+settings.
+
+(2) Access permissions
+
+The tool will check your permissions to test the target file or device. Before testing, 
+make sure you have the permission to access the target file or device to be tested. 
+For the trace file; make sure you have the permissionto create the file.  
+
+(3) Interfernces of I/O tracing
+
+The process of collecting I/O traces may interfere the testing process, therefore it is not 
+proper put the trace file on the drive to be tested. In particular, when the trace file is 
+not too large, it can be put in an RAM-based file system such as tempfs (e.g., under the 
+directory "/run" on Linux OS). 
+
+(4) Factors affecting the observed performance 
+
+For using direct_io, the buffer has to be alligned with the memory page size; therefore, the 
+observed performance may be different by using different operation systems.
+
+In addition, directly writing a disk drive (especially with direct_io) may lead to system 
+corruption if the system metadata on the drive was overwriten.
+
+The functions used to issue read and write requests, such as read/write and pread/pwrite, 
+may have different performance. Specifically, this tool uses the read/write functions.
+
+/***************************Part 2: The structure of the source files*********************/
+
+The project has eight source code files:
+
+project
+  |-- simplebench.h     --> contains all the declarations of the functions and data structures.
+  |    |--- parameter.c --> defines the functions related to parameter parsing and checking.
+  |    |--- stat.c      --> defines the functions related to collect and calculate the results.
+  |    |--- thread.c    --> defines the functions related to the thread workers.
+  |    |--- trace.c     --> defines the functions related to collecting the request traces.
+  |    |--- utility.c   --> defines the utility functions such as permission check.
+  |-- simplebench.c     --> defines the main fuction for flow control of the test.
+  |-- Makefile          --> compiles the codes.
+
+The source code files also contain abundant notes for easy use and understanding.
 
 
-  ------------
-  Create a hash map
-  ------------
-  You can create an instance of the HashMap like this:
+/******************************Part 3: Additional descriptions*************************/
 
-      HashMap<key_t, value_t, hash_func> * d_hash_map=
-		CreateHashMap(numBuckets, numElements);
+The tool has several particular considerations:
 
-  Where the key_t and value_t are the type of key and value. The third pa-
-  rameter hash_func is a functor, which hashes a varaiable of type key_t 
-  to uint32_t. 
-  The function parameter numBuckets is the number of buckets used. Once s-
-  et, the number of buckets cannot be changed. The parameter numElements 
-  is the maximum number of elements that the hash map is supposed to hold.
-  The HashMap class uses a simple memory pool to reserve memory for the n-
-  odes in the hash table. If the number of actual elements exceed numElem-
-  ents, the result is undefined.
-  This function is a __host__ function, which means it can only be called
-  in CPU code. The returned pointer, however, is a device pointer. You can
-  pass the pointer to kernel code.
+(1) Roboustnes
 
+The tool allows the users to set the parameters in any order, and checks the parameter 
+settings; any incorrect setting will be reported.
 
-  ------------
-  Delete a hash map
-  ------------
-  When the hash map is no longer useful, you can free the space used by 
-  it by calling DestroyHashMap like this:
+The tool also checks the permissions of the user to access the target file or device to 
+be tested, and the permission to create the trace file. 
 
-      DestroyHashMap(d_hash_map);
+(2) Memory consumption
 
-  Where d_hash_map is the pointer returned by CreateHashMap().
+The tool considers the memory consumption. The threads shares the read-only data structures  
+during the test process. 
 
+(3) Reducing thread competition 
 
-  ------------
-  Insert an element into hash map
-  ------------
-  You can insert a value into the HashMap like this:
+The tool assigns each thread a private data structure to collect the request results 
+(i.e., the number of the requests, the total request latency, and the request type), 
+avoiding the overhead of thread synchronization caused by using a shared data strcture to 
+collect the request results of all the threads. In addition, compared to calculating the 
+values from the trace file, this design is much more efficient and can instantly print 
+the results upon the test completition.
 
-      my_hash_map[key]=value;
+(4) Scalability
 
-  The operator[] works like the operator [] in the map class in STL. If 
-  no element with a key value equals to key exists, a node is created and
-  the reference to the corresponding value is returned. If the node alre-
-  ady exists, the reference of value is returned.
+The framework of the codes and the design of the data structures make it very easy to 
+add additional functions to the current project. For example, by simply specifying the 
+thread worker as a read worker or a writer worker, we can easily extend the tool to
+support mixed concurrent read and write requests.
 
+(5) Maintenance
 
-  ------------
-  Iterating through the elements
-  ------------
-  An iterator class is provided for HashMap. To iterate through all the 
-  elements, you can use:
-
-      for(HashMap<key_t,value_t,hash_func>::Iterator it=hash_map.begin();
-          it!=hash_map.end();++it)
-          // access the content using the it
-
-  Note that the iterator is not threaded. Multiple threads trying to mod-
-  ify the same iterator can cause problem.
-
-
-
+Abundant notes are added in the source code files; thus, it is easy to read and maintain
+the codes, especially for the future extension.
